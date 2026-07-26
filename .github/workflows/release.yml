@@ -1,0 +1,68 @@
+name: Build and Release Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: |
+          mkdir -p dist
+          pio run -e sender
+          cp .pio/build/sender/firmware.bin dist/sensor-esp32-${GITHUB_REF_NAME}.bin
+
+      - name: Generate SHA256
+        id: sha
+        run: |
+          cd dist
+          sha256sum sensor-esp32-${GITHUB_REF_NAME}.bin > sensor-esp32-${GITHUB_REF_NAME}.sha256
+          HASH=$(cut -d ' ' -f1 sensor-esp32-${GITHUB_REF_NAME}.sha256)
+          SIZE=$(stat -c%s sensor-esp32-${GITHUB_REF_NAME}.bin)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+
+      - name: Generate manifest.json
+        run: |
+          cat > dist/manifest-${GITHUB_REF_NAME}.json <<EOF
+          {
+            "name": "cydsender-ds18b20",
+            "version": "${GITHUB_REF_NAME#v}",
+            "tag": "${GITHUB_REF_NAME}",
+            "board": "esp32dev",
+            "environment": "sender",
+            "file": "sensor-esp32-${GITHUB_REF_NAME}.bin",
+            "bin_url": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/sensor-esp32-${GITHUB_REF_NAME}.bin",
+            "sha256": "${{ steps.sha.outputs.hash }}",
+            "size": ${{ steps.sha.outputs.size }},
+            "mandatory": false,
+            "channel": "stable"
+          }
+          EOF
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/sensor-esp32-${{ github.ref_name }}.bin
+            dist/sensor-esp32-${{ github.ref_name }}.sha256
+            dist/manifest-${{ github.ref_name }}.json
